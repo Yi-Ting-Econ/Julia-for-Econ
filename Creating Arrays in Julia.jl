@@ -12,7 +12,6 @@
     # An empty array
     null = []
 
-    # 
 
 # 2. Predefined Functions for Arrays in Julia
 
@@ -101,7 +100,12 @@
     pick = A[2, 3]
     println(pick)
 
-    # Replace the first row with [11, 11, 11]
+    # Replace the first row of A with [11, 11, 11]
     A[1, :] = [11, 11, 11]
     println(A)
+
+    # Extract the 2nd to 5th element of the vector
+    X = [1, 3, 5, 7, 9, 11, 13]
+    x = X[2:5]
+    println(x)
 
