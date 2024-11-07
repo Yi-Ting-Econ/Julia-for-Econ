@@ -14,7 +14,7 @@ function ols_regression(y, x)
 end
 
 # Step 2: Load the dataset
-file_path = "C:\\Users\\Nana\\Desktop\\github\\auto.csv"
+file_path = "C:\\Users\\Desktop\\github\\auto.csv" #input the file path here
 auto_data = CSV.read(file_path, DataFrame)
 
 # Step 3: Define the dependent variable (y)
