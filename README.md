@@ -3,7 +3,7 @@
 This repository contains beginner-friendly materials to help you get started with Julia programming.
 ## Contents
 
-### Creating Arrays in Julia (`1. Creating Arrays in Julia.jl\) 
+### Creating Arrays in Julia (`1. Creating Arrays in Julia.jl`) 
 Learn the basics of constructing, indexing, and working with arrays in Julia, covering both vectors and matrices.
 
 ### Eigenvalues and Eigenvectors (`2. Eigenvalues and Eigenvectors.jl`)
