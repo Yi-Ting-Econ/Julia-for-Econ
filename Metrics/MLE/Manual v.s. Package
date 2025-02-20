@@ -1,0 +1,185 @@
+#######################################################################################
+
+# 0. Setup
+
+    # Loading Necessary Libraries
+    using StatFiles, DataFrames, ForwardDiff, Optim, LatexPrint, BenchmarkTools, LinearAlgebra
+
+    # Load the dataset and convert to DataFrame
+    cd("C:\\Users\\Desktop\\Computational\\JF")
+    df = DataFrame(load("Mortgage_performance_data.dta"))
+
+    # Dependent Variable
+    y = Array(select(df, :i_close_first_year))
+
+    # Regressors
+    X = Array(select(df, [
+        :i_large_loan, :i_medium_loan, :rate_spread, :i_refinance, :age_r, :cltv, :dti, 
+        :cu, :first_mort_r, :score_0, :score_1, :i_FHA, :i_open_year2, 
+        :i_open_year3, :i_open_year4, :i_open_year5
+    ]))
+    X = hcat(ones(size(X, 1)), X)  # Add a column of ones for the intercept
+
+#######################################################################################
+
+# 1. Define Functions for Log-Likelihood, Score, and Hessian
+
+    # Logistic Function
+    Λ(x) = 1 / (1 + exp(-x))
+
+    # (i) Log-likelihood
+    function log_likelihood_logit(y, X, β)
+        p = Λ.(X * β)
+        return sum(log.(p.^y .* (1 .- p).^(1 .- y)))
+    end
+
+    # (ii) Analytical Score
+    # The Analytical Score is 17×1 vector
+    function analytical_score(y, X, β)
+        residuals = y .- Λ.(X * β)
+        return X' * residuals
+    end
+
+    # (iii) Analytical Hessian
+    # The Hessian Matrix is a 17×17 Matrix
+    function analytical_hessian(X, β)
+        p = Λ.(X * β)
+        W = Diagonal(p .* (1 .- p))  # Weight matrix for Hessian
+        return -X' * W * X
+    end
+
+#######################################################################################
+
+# 2. Numerical Approximations for Score and Hessian
+
+    # Use the ForwardDiff package to find the gradient numerically
+
+        # Numerical Score
+        numerical_score(y, X, β) = ForwardDiff.gradient(b -> log_likelihood_logit(y, X, b), β)
+
+        # Numerical Hessian
+        numerical_hessian(y, X, β) = ForwardDiff.hessian(b -> log_likelihood_logit(y, X, b), β)
+
+    # Comparison of Analytical and Numerical Derivatives
+        
+        # Initial guess for β
+        β_init = vcat(-1.0, zeros(size(X, 2) - 1))
+
+        # Call the functions
+        likelihood = log_likelihood_logit(y, X, β_init)
+
+        analytical_s = analytical_score(y, X, β_init)
+        analytical_H = analytical_hessian(X, β_init)
+        numerical_s = numerical_score(y, X, β_init)
+        numerical_H = numerical_hessian(y, X, β_init)
+
+        # Compare Analytical vs. Numerical
+        score_diff = maximum(abs.(numerical_s - analytical_s))
+        hessian_diff = maximum(abs.(numerical_H .- analytical_H))
+
+        # Output Results
+        println("Log-Likelihood at Initial β: $likelihood")
+        println("Score at Initial β: $analytical_s")
+        println("Hessian at Initial β: $analytical_H")
+        println("Max Difference in Scores: $score_diff")
+        println("Max Difference in Hessians: $hessian_diff")
+
+        # Optional: Display Hessian as LaTeX Table (rounded for readability)
+        lap(round.(numerical_hessian(y, X, β_init), digits=3))
+
+#######################################################################################
+
+# 3. Write a routine that solves the maximum likelihood problem using a Newton algorithm.
+
+    function compute_step(y, X, β_0)
+        H = convert(Matrix{Float64}, analytical_hessian(X, β_0))
+        s = convert(Matrix{Float64}, analytical_score(y, X, β_0))
+        step = - vec(inv(H) * s)
+        return step
+    end
+
+# Newton's method for maximum likelihood optimization (MLE)
+    function MLE_newton_optimization(y, X, β_init; tol=1e-8, max_iter=1000)
+        β = β_init
+        error = Inf  # Initialize error
+        iter = 0     # Initialize iteration counter
+        
+        while error > tol && iter < max_iter
+            β_step = compute_step(y, X, β)  # Compute Newton step
+            β_new = β + β_step              # Update β
+            error = maximum(abs.(β_new - β))  # Compute max difference
+            β = β_new                       # Update β for next iteration
+            iter += 1
+            println("Iteration: $iter, Error: $error")  # Optional progress indicator
+        end
+        
+        if iter == max_iter
+            println("Warning: Maximum iterations reached without convergence.")
+        end
+        
+        return β
+    end
+
+    # Run Newton's optimization method to find the optimal coefficient
+    β_opt = MLE_newton_optimization(y, X, β_init)
+
+    # Measure runtime performance
+    @belapsed β_opt = MLE_newton_optimization(y, X, β_init)
+
+    # Format and display the coefficient vector as a LaTeX table
+    lap(round.(β_opt, digits=4))
+
+#######################################################################################
+
+# 4. Compare the solution and numerical speed with two optimization packages: BFGS and Simplex.
+
+    # Task: Find the optimal coefficient vector β
+
+    # (i) BFGS optimization
+    optim_BFGS = optimize(β -> -log_likelihood_logit(y, X, β), β_init, BFGS(), Optim.Options(f_abstol=1e-12))
+    @belapsed optim_BFGS = optimize(β -> -log_likelihood_logit(y, X, β), β_init, BFGS(), Optim.Options(f_abstol=1e-12))
+
+    # (ii) Nelder-Mead Simplex optimization with increased iterations
+    optim_Simplex = optimize(β -> -log_likelihood_logit(y, X, β), β_init, Optim.Options(iterations=50000, f_abstol=1e-12))
+    @belapsed optim_Simplex = optimize(β -> -log_likelihood_logit(y, X, β), β_init, Optim.Options(iterations=50000, f_abstol=1e-12))
+    β_Simplex = optim_Simplex.minimizer
+
+    # Combine results and display as a LaTeX-compatible table
+    results = hcat(β_opt, β_BFGS, β_Simplex)
+    lap(round.(results, digits=4))
+
+    # (iii) BFGS optimization with the log likelihood, score, and Hessian supplied
+
+    # Define the in-place functions
+    function gradient!(g, β)
+        g[:] = -analytical_score(y, X, β)  # Fill the gradient array `g`
+    end
+    
+    function hessian!(H, β)
+        H[:] = -analytical_hessian(X, β)  # Fill the Hessian matrix `H`
+    end
+    
+    # The running time decreased
+    opt_bfgs_gh = optimize(
+        β -> -log_likelihood_logit(y, X, β),  # Objective function
+        gradient!,                           # In-place gradient
+        hessian!,                            # In-place Hessian
+        β_init,                              # Initial guess
+        BFGS(),                              # Optimization algorithm
+        Optim.Options(f_abstol=1e-12)        # Options
+    )
+
+    # Time: 0.2404737 sec
+    @belapsed opt_bfgs_gh = optimize(
+        β -> -log_likelihood_logit(y, X, β),  
+        gradient!,                           
+        hessian!,                            
+        β_init,                              
+        BFGS(),                              
+        Optim.Options(f_abstol=1e-12)        
+    )
+
+    # Extract the minimizer
+    β_BFGS_improved = opt_bfgs_gh.minimizer
+    println("Optimal coefficients: ", β_BFGS_improved)
+    
